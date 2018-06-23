@@ -1,0 +1,6 @@
+#!/bin/bash
+
+cd ${GRAPHLITE_HOME}
+rm -rf Output WorkerOut
+rm bin/graphlite
+mkdir Output

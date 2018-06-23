@@ -1,0 +1,1 @@
+/usr/bin/c++ -fPIC -g  -shared -Wl,-soname,libNaiveSimRank.so -o libNaiveSimRank.so CMakeFiles/NaiveSimRank.dir/NaiveSimRank.cc.o 

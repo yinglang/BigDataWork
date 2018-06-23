@@ -1,0 +1,145 @@
+1. graphLite程序跑起来
+
+start-graphlite /home/hui/github/BigDataWork/bigwork/SimRank/cmake-build-debug/libSimRank.so Input/facebookcombined_4w 100 10 0.6 /home/hui/github/BigDataWork/bigwork/SimRank/log/facebook
+
+1.2 we use sparse matrxi to store it, implement struct use map
+1.3 remove key_struct
+1.1 map assign is deep copy
+1.4 test static variable in single machine
+a. in single machine, static var is shared by all vertext in same worker, but not share by vertexs in different workers.
+it make sense, data are not share by two diffrent process
+```
+superstep: 1
+a: 1
+a: 2
+a: 3
+a: 4
+a: 5
+a: 6
+a: 7
+a: 8
+```
+
+b. a worker will keep the value of static var in different superstep.
+it make sense, cause for different super step, workers are same process.
+```
+vid: 4024; a: 1007
+vid: 4028; a: 1008
+vid: 4032; a: 1009
+vid: 4036; a: 1010
+sent WW_NODEMSGLIST, 5679 msgs to worker[2]
+sent WW_NODEMSGLIST, 5824 msgs to worker[3]
+sent WW_NODEMSGLIST, 6106 msgs to worker[4]
+sent WW_FINISHSENDNODEMSG to worker[2]
+sent WW_FINISHSENDNODEMSG to worker[3]
+sent WW_FINISHSENDNODEMSG to worker[4]
+received all WW_NODEMSGLIST && WW_FINISHNODEMSG
+sent WM_CURSSFINISH
+received MW_NEXTSSSTART
+-----------------------------------------
+superstep: 1
+vid: 0; a: 1011
+vid: 4; a: 1012
+vid: 8; a: 1013
+vid: 12; a: 1014
+vid: 16; a: 1015
+vid: 20; a: 1016
+```
+1.5 dynamic MSG VALUETYPE
+```
+typedef struct {
+    double a;
+    string s;
+    map<int, double> score;
+}MsgType;
+
+compute(pmsg){
+    if(!pmsgs->done()) 
+        cout << "msg: " << pmsgs->getValue().a << ", " << pmsgs->getValue().s << ";" << endl;
+
+    ....
+
+    MsgType msg;
+    msg.a = val / n;
+    char s[64];
+    sprintf(s, "%ld", getVertexId());
+    msg.s = s;
+    sendMessageToAllNeighbors(msg);
+```
+
+程序出问题,卡死,输出到文件里,查看结果, 果然除了问题
+```
+msg: 0.00288184, p;
+msg: 0.00288184,  ;
+msg: 0.00288184,  ;
+msg: 0.00288184,  ;
+msg: 0.00288184,  ;
+msg: 0.00288184,  ;
+msg: 0.00288184,  ;
+msg: 0.00288184,  ;
+msg: 0.00288184,  ;
+msg: 0.00288184,  ;
+msg: 0.00288184,  ;
+```
+即使预先给动态变量分配了空间,也是不行的.
+sendMsg的时候,发送的只是Msg结构里面的数据,也就是,只是指针(内存)被发出去了,而实际的堆中的数据并没有被发出去.
+输出 (void*)(pmsgs->getValue().s.data())
+```
+vid: 3;msg: 0.00288184, 0x7ffe643f2d48;
+vid: 0;vid: 4;msg: 0.00288184, 0x7ffe643f2d48;
+vid: 8;msg: 0.00288184, 0x7ffe643f2d48;
+vid: 12;msg: 0.00288184, 0x7ffe643f2d48;
+vid: 16;msg: 0.00288184, 0x7ffe643f2d48;
+vid: 7;msg: 0.00288184, 0x7ffe643f2d48;
+vid: 20;msg: 0.00288184, 0x7ffe643f2d48;
+```
+所以getMsgSize是用于输出的
+
+1.6输出的value指针指向同一个地方,有些定点没有指向NULL,
+```
+vid: 8;value: 0x2304240
+vid: 25;value: 0x2304240
+vid: 12;value: 0
+```
+查看Input的地方,loadGraph时候,
+指向同一个提放,是因为使用了同一个value转换成的指针
+addVertex的value是同一个value,后面通过memcpy复制得到vertex的value,所以指针也被直接复制了过去,而没有重新声明.
+```
+void Worker::addVertex(int64_t vid, void* pvalue, int outdegree) {
+    int worker_cnt = m_machine_cnt - 1;
+    int64_t index = vid / worker_cnt; // hash partition
+    Node* pnode = (Node *)( (char *)m_pnode + index * Node::n_size );
+    pnode->m_out_degree = outdegree;
+    pnode->m_edge_index = m_edge_cnt;
+    m_edge_cnt += (pnode->m_out_degree);
+    memcpy(pnode->value, pvalue, Node::n_value_size);
+}
+```
+addVertex只添加from vertex, 导致没有出度的vertex, 没有被显式添加(addVertex与其说是添加,不如说是赋值,因为之前给出了n,m,已经被创建了出来,在一个数组里面),而这些点并没有调用halt,所以还是active,还是会被创建出来并执行compute.
+value.s为空的全是出度为NULL的
+```
+vid: 43;value: 0; out degree: 0
+vid: 33;value: 0x11d4280; out degree: 1
+vid: 47;value: 0x17d7200; out degree: 1
+vid: 37;value: 0; out degree: 0
+```
+value.doublea在结构里面复制为2.0,value.s为NULL的vertex,doublea也没有被成功初始化,可以认为graphlite对于没有调用过addVertex的vertex初始化value的方法,是不会调用结构体的初始化的.
+```
+vid: 33;value: 0x1dd3280, 2; out degree: 1
+vid: 37;value: 0, 0; out degree: 0
+```
+
+2. about graphlite
+2.1 Msg, Edge, Vertex's Value size must be fixed, given by getXXXValueSize() of InputFormatter
+2.2 it value Type have nest pointer, only pointer value(a address) will be include, the memory that pointer point to will no include. so sendMsg only send a address.
+2.2.1 if use point or any type nest with pointer(string, vetect, map...) in Value Type, watch out it. or not use pointer in Value Type.
+2.3 input file, from vertex must be sorted.
+2.4 msg是要cross-worker的,所以每次都会删除,但是vertex value不会,所以我们可以在vertex value中使用指针(但对于非addVertex初始化的Vertex,Value创建不会经过构造函数,所以我们可以定义时候初始化为NULL,在superStep()==0的时候给他赋值,申请空间)
+
+
+2. 讲解我们的算法
+
+3. simrank与改进
+
+4. 可视化展示
+
