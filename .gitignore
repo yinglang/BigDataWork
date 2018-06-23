@@ -1,0 +1,12 @@
+hw1/java_hdfs/out/*
+hw1/java_hdfs/.idea/*
+hw2/java_map_reduce/out/*
+hw2/java_map_reduce/.idea/*
+hw2/.ipynb_checkpoints/*
+hw2/cpp_GraphLite/.idea/*
+hw2/cpp_GraphLite/cmake-build-debug/*
+*/cmake-build-debug
+*/.idea
+*/.ipynb_checkpoints
+
+
